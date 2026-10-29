@@ -201,7 +201,6 @@ class Lobes {
     const t = (this.age += dt);
     if (t > 2.35) {
       this.done = true;
-      s.shadowSpread = 0;
       s.miniFaces = null;
       return;
     }
@@ -238,7 +237,6 @@ class Lobes {
       this.scale[i] = [1 / Math.sqrt(sy), sy];
       return [sg * this.sep * Math.cos(theta), GROUND + hop + this.r * sy, sg * this.sep * Math.sin(theta)];
     });
-    s.shadowSpread = this.sep + 0.75;
     s.miniFaces =
       t > 0.22 && t < 2.12
         ? this.lobes.map((p, i) => {
@@ -248,6 +246,11 @@ class Lobes {
             return { p, r: this.r, yaw: clamp((other[0] - p[0]) * 0.8, -0.6, 0.6), alpha: behind };
           })
         : null;
+  }
+
+  // each half casts its own shadow, which follows it round the dance and under its hops
+  casts() {
+    return this.lobes.map((p) => [p, this.r]);
   }
 
   shapes() {

@@ -154,7 +154,6 @@ export class Slime {
     this.spin = 0; // extra face yaw while spinning (radians)
     this.bodyScale = 1; // < 1 while the split animation has the body in two
     this.faceScale = 1;
-    this.shadowSpread = 0;
     this.color = Object.hasOwn(COLORS, color) ? color : 'pink';
     this.ink = COLORS[this.color].calm.slice();
     this.pose = this.rig();
@@ -879,26 +878,38 @@ export class Slime {
     }
   }
 
-  shadow(view) {
+  // Soft shadows on the floor: one under the body, as wide as the bottom of its skin, and one under
+  // every drop, the pulled glob and whatever the animations send about (the split halves), each
+  // right below it and darker and tighter the nearer the floor it is. They follow along as it all moves.
+  shadows(view) {
     const g = this.pose;
     const air = clamp(g.y / 1.3);
-    // as wide as the bottom of the skin
+    const sc = this.bodyScale;
     let [lo, hi] = [Infinity, -Infinity];
     this.skin.p.forEach(([x], i) => {
       if (REST[i].height > 0.4) return;
       lo = Math.min(lo, x);
       hi = Math.max(hi, x);
     });
-    const spread = Math.max((hi - lo) / 2 + SKIN * this.bodyScale + 0.05, this.shadowSpread);
     const c = project(view, [(lo + hi) / 2, GROUND, 0]);
-    return {
+    const out = [];
+    out.push({
       x: c.x,
       y: c.y + 0.02 * view.unit,
-      rx: spread * view.unit * (1 - 0.35 * air),
-      ry: 0.17 * view.unit * (1 - 0.35 * air),
-      alpha: 0.26 * (1 - 0.6 * air),
-      ink: this.ink.map((v) => lerp(0.7, v, 0.15)),
+      rx: ((hi - lo) / 2 + SKIN * sc + 0.05) * view.unit * (1 - 0.35 * air),
+      ry: 0.17 * view.unit * Math.sqrt(sc) * (1 - 0.35 * air),
+      alpha: 0.26 * (1 - 0.6 * air) * smoothstep(0.05, 0.4, sc),
+    });
+    const under = ([x, y, z = 0], r, strength = 1) => {
+      const up = clamp(Math.max(0, y - r - GROUND) / 1.6);
+      const f = project(view, [x, GROUND, z]);
+      const rx = (1.2 * r + 0.05) * (1 + 0.5 * up) * f.s;
+      out.push({ x: f.x, y: f.y + 0.02 * view.unit, rx, ry: 0.22 * rx, alpha: 0.26 * strength * (1 - up) ** 2 });
     };
+    for (const d of this.drops) if (!d.fade) under(d.p, d.r, 1 - d.absorb / 0.16);
+    if (this.pull) under(this.pull.glob, GLOB);
+    for (const e of this.entities) for (const [p, r] of e.casts?.(this) ?? []) under(p, r);
+    return out.filter((s) => s.alpha > 0.004);
   }
 
   // Where the body sits on screen at rest (for avatar crops).

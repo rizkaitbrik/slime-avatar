@@ -4,9 +4,12 @@
 // 3D glints (and optional shading) that slide over it as it deforms. A filled body's segments
 // trace a closed outline instead, and everything inside it is filled: a soft blob of any shape.
 // Overlay bodies make a second scene drawn over the first and clipped to it: liquid running on it.
-// Bodies come with a circle round them, so a pixel skips the ones too far away to matter.
+// A subtle shadow darkens the side away from the light: the part of the scene that its own shape,
+// nudged towards the light, no longer covers. Bodies come with a circle round them, so a pixel
+// skips the ones too far away to matter.
 export const MAX_PRIMS = 160;
 export const MAX_BODIES = 48;
+export const MAX_SHADOWS = 24;
 
 const VERT = `#version 300 es
 in vec2 aPos;
@@ -25,13 +28,17 @@ uniform float uUnit;
 uniform float uShaded;
 uniform vec3 uInk;
 uniform vec3 uPaper;
-uniform vec4 uShadow; // soft contact shadow on the paper: centre and radii (px)
-uniform float uShadowAlpha;
+uniform vec4 uShadows[${MAX_SHADOWS}]; // soft shadows on the paper: centre and radii (px)...
+uniform float uShadowAlphas[${MAX_SHADOWS}]; // ...and how dark each is
+uniform int uShadowCount;
 uniform vec3 uShadowInk;
 uniform float uGloss; // strength of the glints (1 = solid white)
 uniform float uLine; // width (px) of a drawn outline just inside the silhouette, 0 for none
 uniform vec3 uLineInk;
 uniform vec3 uOverInk; // the overlay scene's colour
+uniform float uShade; // how much darker the shadow side is (0 for no shadow)
+uniform vec2 uShadeShift; // px, away from the light: how deep the shadow side reaches
+uniform float uShadeSoft; // px: how soft its edge is
 
 out vec4 fragColor;
 
@@ -66,6 +73,81 @@ void addBody(float bD, vec3 bN, float bR, float bS, vec2 bOut, bool bIn, float b
   seed = w > 0.5 ? seed : body;
   J = min(1.0, J * w + 4.0 * w * (1.0 - w));
   G = mix(glint, G, w);
+}
+
+// Exact distance from p to a tapered segment (its end circles' tangent hull, so segments chained
+// into a tail meet without beads at the joints), with the surface's outward direction g, the
+// radius r there and how far along the segment that is.
+float tube(vec2 p, vec4 g0, vec4 g1, out vec2 g, out float r, out float along) {
+  vec2 a = g0.xy;
+  vec2 ba = g0.zw - a;
+  vec2 pa = p - a;
+  float ra = g1.x;
+  float rb = g1.y;
+  float len = length(ba);
+  float dr = ra - rb;
+  if (len * len <= dr * dr + 1e-4) {
+    vec2 c = ra >= rb ? pa : pa - ba; // one circle swallows the other
+    r = max(ra, rb);
+    g = c / max(length(c), 1e-4);
+    along = ra >= rb ? 0.0 : len;
+    return length(c) - r;
+  }
+  vec2 ax = ba / len;
+  vec2 pr = vec2(ax.y, -ax.x);
+  float qx = dot(pa, pr);
+  float qy = dot(pa, ax);
+  float sn = dr / len;
+  float cs = sqrt(1.0 - sn * sn);
+  float side = cs * qy - sn * abs(qx);
+  if (side < 0.0) {
+    g = pa / max(length(pa), 1e-4); r = ra; along = 0.0;
+    return length(pa) - ra;
+  }
+  if (side > len * cs) {
+    vec2 pb = pa - ba;
+    g = pb / max(length(pb), 1e-4); r = rb; along = len;
+    return length(pb) - rb;
+  }
+  g = sign(qx) * pr * cs + ax * sn;
+  along = clamp(qy, 0.0, len);
+  r = mix(ra, rb, along / len);
+  return cs * abs(qx) + sn * qy - ra;
+}
+
+// Just the main scene's distance at q, for the shadow: the same bodies merged the same way. Far
+// from them it stops at a cut-off; past the shadow's soft edge, so the shadow side is always at
+// full strength however gooey the bodies on screen are.
+float silhouette(vec2 q) {
+  float d = uFar + uShadeSoft;
+  int first = 0;
+  for (int b = 0; b < MAX_BODIES; b++) {
+    if (b >= uBodyCount) break;
+    vec4 B = uBodies[b];
+    int start = first;
+    int end = first + int(B.w);
+    first = end;
+    if (end == start || length(q - B.xy) - B.z > d) continue;
+    vec4 h1 = texelFetch(uPrims, ivec2(start * 3 + 1, 0), 0);
+    if (h1.w < 0.0) continue; // the overlay casts no shadow
+    float k = texelFetch(uPrims, ivec2(start * 3 + 2, 0), 0).y;
+    float bD = 1e5; float bR = 0.0; bool bIn = false;
+    for (int i = start; i < end; i++) {
+      vec4 g0 = texelFetch(uPrims, ivec2(i * 3, 0), 0);
+      vec4 g1 = texelFetch(uPrims, ivec2(i * 3 + 1, 0), 0);
+      vec2 a = g0.xy;
+      vec2 ba = g0.zw - a;
+      if (h1.w > 0.0 && (a.y > q.y) != (g0.w > q.y) && q.x < a.x + (q.y - a.y) * ba.x / ba.y) bIn = !bIn;
+      if (length(q - a - 0.5 * ba) - 0.5 * length(ba) - max(g1.x, g1.y) > min(bD, d + k)) continue;
+      vec2 g; float r; float along;
+      float t = tube(q, g0, g1, g, r, along);
+      if (t < bD) { bD = t; bR = r; }
+    }
+    if (h1.w > 0.0 && bIn) bD = -(bD + 2.0 * bR);
+    float w;
+    d = smin(d, bD, k, w);
+  }
+  return d;
 }
 
 float hash11(float p) { p = fract(p * 0.1031); p *= p + 33.33; p *= p + p; return fract(p); }
@@ -108,44 +190,12 @@ void main() {
       vec2 ba = g0.zw - a;
       // a filled body's segments run round its outline: count crossings to know if p is inside
       if (bodyFill > 0.0 && (a.y > p.y) != (g0.w > p.y) && p.x < a.x + (p.y - a.y) * ba.x / ba.y) bIn = !bIn;
-      float ra = g1.x;
-      float rb = g1.y;
-      float len = length(ba);
       // lower bound on this segment's distance: skip it when it cannot change anything
-      float lb = length(p - a - 0.5 * ba) - 0.5 * len - max(ra, rb);
+      float lb = length(p - a - 0.5 * ba) - 0.5 * length(ba) - max(g1.x, g1.y);
       if (lb > min(bD, scene + bodyK)) continue;
 
-      // Exact distance to the tangent hull of the two end circles, so tapered segments chained
-      // into a tail meet without beads at the joints. g is the outward direction of the surface.
-      vec2 pa = p - a;
-      float d; vec2 g; float r; float along;
-      float dr = ra - rb;
-      if (len * len <= dr * dr + 1e-4) {
-        vec2 c = ra >= rb ? pa : pa - ba; // one circle swallows the other
-        r = max(ra, rb);
-        d = length(c) - r;
-        g = c / max(length(c), 1e-4);
-        along = ra >= rb ? 0.0 : len;
-      } else {
-        vec2 ax = ba / len;
-        vec2 pr = vec2(ax.y, -ax.x);
-        float qx = dot(pa, pr);
-        float qy = dot(pa, ax);
-        float sn = dr / len;
-        float cs = sqrt(1.0 - sn * sn);
-        float side = cs * qy - sn * abs(qx);
-        if (side < 0.0) {
-          d = length(pa) - ra; g = pa / max(length(pa), 1e-4); r = ra; along = 0.0;
-        } else if (side > len * cs) {
-          vec2 pb = pa - ba;
-          d = length(pb) - rb; g = pb / max(length(pb), 1e-4); r = rb; along = len;
-        } else {
-          d = cs * abs(qx) + sn * qy - ra;
-          g = sign(qx) * pr * cs + ax * sn;
-          along = clamp(qy, 0.0, len);
-          r = mix(ra, rb, along / len);
-        }
-      }
+      vec2 g; float r; float along;
+      float d = tube(p, g0, g1, g, r, along);
       if (d < bD) {
         bD = d;
         // normal of a round tube with this cross-section, seen from above
@@ -200,17 +250,22 @@ void main() {
     col = mix(col, mix(uInk, vec3(1.0, 0.5, 0.95), 0.5), bounce * 0.55);
   }
   col = mix(col, vec3(1.0), glint);
+  // the shadow side: where the scene, nudged towards the light, no longer covers this pixel
+  if (uShade > 0.0 && cover > 0.0) col *= 1.0 - uShade * smoothstep(-uShadeSoft, uShadeSoft, silhouette(p + uShadeShift));
   // line art: everything merged into one silhouette gets one outline, with no seams where it joins
   if (uLine > 0.0) col = mix(col, uLineInk, clamp(D + uLine + 0.5, 0.0, 1.0));
   // the overlay, only where the scene under it is, with the same outline
   vec3 oc = uOverInk;
   if (uLine > 0.0) oc = mix(oc, uLineInk, clamp(DO + uLine + 0.5, 0.0, 1.0));
   col = mix(col, oc, clamp(0.5 - DO, 0.0, 1.0) * clamp(0.5 - D - uLine, 0.0, 1.0));
-  vec3 paper = uPaper;
-  if (uShadowAlpha > 0.0) {
-    float e = length((p - uShadow.xy) / uShadow.zw);
-    paper = mix(paper, uShadowInk, uShadowAlpha * (1.0 - smoothstep(0.15, 1.0, e)));
+  // the shadows on the paper; where they overlap they darken together, never past black
+  float dark = 0.0;
+  for (int i = 0; i < ${MAX_SHADOWS}; i++) {
+    if (i >= uShadowCount) break;
+    float e = length((p - uShadows[i].xy) / uShadows[i].zw);
+    dark = 1.0 - (1.0 - dark) * (1.0 - uShadowAlphas[i] * (1.0 - smoothstep(0.15, 1.0, e)));
   }
+  vec3 paper = mix(uPaper, uShadowInk, dark);
   fragColor = vec4(mix(paper, col, cover), 1.0);
 }`;
 
@@ -241,7 +296,7 @@ export class Renderer {
     this.paper = paper;
     this.prog = link(gl, VERT, FRAG);
     this.loc = Object.fromEntries(
-      ['uPrims', 'uBodies', 'uBodyCount', 'uFar', 'uRes', 'uUnit', 'uShaded', 'uInk', 'uPaper', 'uShadow', 'uShadowAlpha', 'uShadowInk', 'uGloss', 'uLine', 'uLineInk', 'uOverInk'].map((n) => [
+      ['uPrims', 'uBodies', 'uBodyCount', 'uFar', 'uRes', 'uUnit', 'uShaded', 'uInk', 'uPaper', 'uShadows', 'uShadowAlphas', 'uShadowCount', 'uShadowInk', 'uGloss', 'uLine', 'uLineInk', 'uOverInk', 'uShade', 'uShadeShift', 'uShadeSoft'].map((n) => [
         n,
         gl.getUniformLocation(this.prog, n),
       ]),
@@ -262,6 +317,8 @@ export class Renderer {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, MAX_PRIMS * 3, 1, 0, gl.RGBA, gl.FLOAT, null);
+    this.shadowBoxes = new Float32Array(MAX_SHADOWS * 4);
+    this.shadowAlphas = new Float32Array(MAX_SHADOWS);
   }
 
   resize(w, h) {
@@ -271,11 +328,13 @@ export class Renderer {
     }
   }
 
-  // shadow: optional soft ellipse under the slime, { x, y, rx, ry, alpha, ink } in device px;
+  // shadows: soft ellipses on the paper, [{ x, y, rx, ry, alpha }] in device px, in shadowInk;
   // gloss: how strong the glints are, from 0 (none) to 1 (solid white);
   // line: width in device px of an outline round the silhouette (0 = none), drawn in lineInk
-  // overInk: the colour of overlay bodies
-  render(buf, view, { shaded = false, shadow = null, gloss = 1, line = 0, lineInk = [0, 0, 0], overInk = [1, 1, 1] } = {}) {
+  // overInk: the colour of overlay bodies;
+  // shade: how much darker the side away from the light is (0 = none), shadeShift: how far that
+  // side reaches in device px (pointing away from the light), shadeSoft: how soft its edge is in px
+  render(buf, view, { shaded = false, shadows = [], shadowInk = [0.8, 0.72, 0.84], gloss = 1, line = 0, lineInk = [0, 0, 0], overInk = [1, 1, 1], shade = 0, shadeShift = [0, 0], shadeSoft = 1 } = {}) {
     const { gl, canvas, loc } = this;
     const w = canvas.width;
     const h = canvas.height;
@@ -283,16 +342,19 @@ export class Renderer {
     gl.disable(gl.SCISSOR_TEST);
     gl.clearColor(this.paper[0], this.paper[1], this.paper[2], 1);
     gl.clear(gl.COLOR_BUFFER_BIT);
-    if (buf.count === 0 && !shadow) return;
+    shadows = shadows.slice(0, MAX_SHADOWS);
+    if (buf.count === 0 && !shadows.length) return;
 
-    // Only shade the box the slime (and its shadow) actually covers this frame.
+    // Only shade the box the slime (and its shadows) actually covers this frame.
     let [x0, y0, x1, y1] = buf.bounds;
-    if (shadow) {
-      x0 = Math.min(x0, shadow.x - shadow.rx);
-      y0 = Math.min(y0, shadow.y - shadow.ry);
-      x1 = Math.max(x1, shadow.x + shadow.rx);
-      y1 = Math.max(y1, shadow.y + shadow.ry);
-    }
+    shadows.forEach((s, i) => {
+      x0 = Math.min(x0, s.x - s.rx);
+      y0 = Math.min(y0, s.y - s.ry);
+      x1 = Math.max(x1, s.x + s.rx);
+      y1 = Math.max(y1, s.y + s.ry);
+      this.shadowBoxes.set([s.x, s.y, s.rx, s.ry], i * 4);
+      this.shadowAlphas[i] = s.alpha;
+    });
     const sx = Math.max(0, Math.floor(x0));
     const sy = Math.max(0, Math.floor(h - y1));
     const sw = Math.min(w, Math.ceil(x1)) - sx;
@@ -315,13 +377,17 @@ export class Renderer {
     gl.uniform1f(loc.uShaded, shaded ? 1 : 0);
     gl.uniform3fv(loc.uInk, this.ink);
     gl.uniform3fv(loc.uPaper, this.paper);
-    gl.uniform4f(loc.uShadow, shadow?.x ?? 0, shadow?.y ?? 0, shadow?.rx ?? 1, shadow?.ry ?? 1);
-    gl.uniform1f(loc.uShadowAlpha, shadow?.alpha ?? 0);
-    gl.uniform3fv(loc.uShadowInk, shadow?.ink ?? [0.8, 0.72, 0.84]);
+    gl.uniform4fv(loc.uShadows, this.shadowBoxes);
+    gl.uniform1fv(loc.uShadowAlphas, this.shadowAlphas);
+    gl.uniform1i(loc.uShadowCount, shadows.length);
+    gl.uniform3fv(loc.uShadowInk, shadowInk);
     gl.uniform1f(loc.uGloss, gloss);
     gl.uniform1f(loc.uLine, line);
     gl.uniform3fv(loc.uLineInk, lineInk);
     gl.uniform3fv(loc.uOverInk, overInk);
+    gl.uniform1f(loc.uShade, shade);
+    gl.uniform2fv(loc.uShadeShift, shadeShift);
+    gl.uniform1f(loc.uShadeSoft, Math.max(shadeSoft, 0.5));
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
 }

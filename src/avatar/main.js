@@ -24,9 +24,11 @@ const slimeCanvas = document.getElementById('slime');
 const faceCanvas = document.getElementById('face');
 const faceCtx = faceCanvas.getContext('2d');
 const buf = new PrimBuffer(MAX_PRIMS, MAX_BODIES);
-// Flat ink, no shading or glints. The outline is a thin line just a shade darker than the body,
-// barely there; liquid running over the body (a tear) is a shade lighter.
-const LOOK = { outline: 0.012, outlineShade: 0.8, tearTint: 0.4 };
+// Flat ink, no glints. The outline is a thin line just a shade darker than the body, barely there;
+// liquid running over the body (a tear) is a shade lighter. With the light up on the left, a
+// subtle shadow darkens a soft crescent along its lower right (sizes in body radii).
+const LOOK = { outline: 0.012, outlineShade: 0.8, tearTint: 0.4, shade: 0.09, shadeDepth: 0.13, shadeSoft: 0.03 };
+const AWAY_FROM_LIGHT = [0.55, 0.83]; // on screen, y down
 
 let renderer;
 try {
@@ -188,7 +190,11 @@ function draw(s) {
     line: LOOK.outline * view.unit,
     lineInk: s.ink.map((v) => v * LOOK.outlineShade),
     overInk: s.ink.map((v) => v + (1 - v) * LOOK.tearTint),
-    shadow: s.shadow(view),
+    shade: LOOK.shade,
+    shadeShift: AWAY_FROM_LIGHT.map((v) => v * LOOK.shadeDepth * view.unit),
+    shadeSoft: LOOK.shadeSoft * view.unit,
+    shadows: s.shadows(view),
+    shadowInk: s.ink.map((v) => 0.7 + 0.15 * (v - 0.7)), // grey, a touch of the body colour
   });
   faceCtx.clearRect(0, 0, faceCanvas.width, faceCanvas.height);
   drawFace(faceCtx, s.faceRig(view));
