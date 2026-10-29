@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Slime Motion Study</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M16 3c6 7 11 11 11 17a11 11 0 0 1-22 0c0-6 5-10 11-17Z' fill='%23f0f'/%3E%3Cellipse cx='12' cy='19' rx='2.5' ry='4' fill='%23fff' transform='rotate(25 12 19)'/%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="stage">
+      <canvas id="slime" aria-label="Animated magenta slime"></canvas>
+      <canvas id="overlay" aria-hidden="true"></canvas>
+      <canvas id="sheet" hidden></canvas>
+    </main>
+
+    <header class="caption">
+      <span class="title">Slime study</span>
+      <span class="phase"><b id="phase-name">Settle</b><span id="phase-note"></span></span>
+    </header>
+
+    <footer class="controls">
+      <button id="play" class="icon" type="button" aria-label="Pause"></button>
+      <div class="timeline">
+        <input id="scrub" type="range" min="0" max="1800" step="1" value="0" aria-label="Loop time" />
+        <div id="ticks" class="ticks"></div>
+      </div>
+      <output id="clock">0.00 s</output>
+      <div class="speed" role="group" aria-label="Playback speed">
+        <button type="button" data-speed="0.25">¼×</button>
+        <button type="button" data-speed="0.5">½×</button>
+        <button type="button" data-speed="1">1×</button>
+      </div>
+      <div class="toggles">
+        <label><input id="opt-shaded" type="checkbox" /> 3D shading</label>
+        <label><input id="opt-face" type="checkbox" /> Face</label>
+        <label><input id="opt-guides" type="checkbox" /> Guides</label>
+      </div>
+      <a class="link" href="index.html">Avatar</a>
+    </footer>
+
+    <p id="nogl" hidden>This study needs a browser with WebGL2.</p>
+    <script type="module" src="src/study/main.js"></script>
+  </body>
+</html>

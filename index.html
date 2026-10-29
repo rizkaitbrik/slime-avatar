@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Slime Avatar</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M16 4C8.8 4 3 9.8 3 16.8 3 24 8.6 28 16 28s13-4 13-11.2C29 9.8 23.2 4 16 4Z' fill='%23f066e8'/%3E%3Cellipse cx='12' cy='15.5' rx='1.7' ry='2.5' fill='%231b2c30'/%3E%3Cellipse cx='20' cy='15.5' rx='1.7' ry='2.5' fill='%231b2c30'/%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="stage">
+      <canvas id="slime" aria-label="Slime avatar: click to poke it, drag to stretch it"></canvas>
+      <canvas id="face" aria-hidden="true"></canvas>
+      <canvas id="sheet" hidden></canvas>
+    </main>
+
+    <header class="caption">
+      <span class="title">Slime avatar</span>
+      <span class="phase"><b id="status">Idle</b><span id="status-note"></span></span>
+    </header>
+
+    <aside class="avatars" aria-label="The live avatar at small sizes">
+      <canvas class="avatar" data-size="72"></canvas>
+      <canvas class="avatar" data-size="44"></canvas>
+      <canvas class="avatar" data-size="28"></canvas>
+    </aside>
+
+    <footer class="controls stacked">
+      <div class="row">
+        <span class="label">Mood</span>
+        <div id="moods" class="seg" role="group" aria-label="Mood"></div>
+      </div>
+      <div class="row">
+        <span class="label">Play</span>
+        <div id="emotes" class="seg" role="group" aria-label="Animations"></div>
+        <a class="link" href="study.html">Motion study</a>
+      </div>
+      <div class="row">
+        <span class="label">Color</span>
+        <div id="colors" class="swatches" role="group" aria-label="Color"></div>
+      </div>
+    </footer>
+
+    <p id="nogl" hidden>This needs a browser with WebGL2.</p>
+    <script type="module" src="src/avatar/main.js"></script>
+  </body>
+</html>
